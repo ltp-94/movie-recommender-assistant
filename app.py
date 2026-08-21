@@ -46,7 +46,7 @@ async def recommend_movies(request: QueryRequest):
 
         # 2. Generate the LLM Recommendation (RAG)
         # CRITICAL: We only pass the TOP 5 to avoid the "Request too large" (TPM) error
-        ai_response = generate_recommendation(user_query, final_results[:20])
+        ai_response = generate_recommendation(user_query, final_results[:5])
 
         # 3. Calculate metrics for Monitoring
         end_time = time.time()
@@ -71,14 +71,15 @@ async def recommend_movies(request: QueryRequest):
         # 5. Return JSON response
         return {
             "conversation_id": conversation_id,
+            "movies": final_results,
             "recommendation": ai_response,
             "top_movies": [
                 {
                     "title": m.get("title"),
-                    "year": m.get("year"),
+                    "year": m.get("realese_year"),
                     "genres": m.get("genres"),
                     "final_score": round(m.get("final_score", 0), 2)
-                } for m in final_results
+                } for m in final_results[:5]
             ],
             "response_time": round(duration, 2)
         }

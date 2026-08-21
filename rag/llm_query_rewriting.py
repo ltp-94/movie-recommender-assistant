@@ -26,7 +26,9 @@ def rewrite_query(user_query):
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Rewrite this for a movie search engine: {user_query}"}
-        ]
+        ],
+        temperature=0.7,
+        seed=42
     )
     return response.choices[0].message.content
 

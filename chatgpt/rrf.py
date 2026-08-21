@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 # Modular imports
 from ingestion.config import INDEX_NAME, ELASTICSEARCH_URL
 from rag.llm_query_rewriting import rewrite_query
+from rag.llm_generation import generate_recommendation
 
 load_dotenv()
 
@@ -22,7 +23,17 @@ print("🚀 Loading search models...")
 bi_encoder = SentenceTransformer("BAAI/bge-base-en-v1.5", device=device)
 cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
 
-es = Elasticsearch(ELASTICSEARCH_URL)
+# es = Elasticsearch(ELASTICSEARCH_URL)
+# # Change this line:
+# es = Elasticsearch(ELASTICSEARCH_URL)
+
+# To this:
+es = Elasticsearch(
+    ELASTICSEARCH_URL,
+    request_timeout=60,       # Increased to 60 seconds
+    retry_on_timeout=True, 
+    max_retries=3
+)
 
 # ============================================================
 # 2. UPDATED SEARCH FUNCTIONS (Returning IDs)
@@ -134,7 +145,7 @@ def search_rrf_pipeline(user_query, top_n=150):
     vec_res = get_vector_results(rewritten, top_n=150)
     
     # 3. Fusion
-    fused = reciprocal_rank_fusion(bm25_res, vec_res, top_n=150)
+    fused = reciprocal_rank_fusion(bm25_res, vec_res, top_n=50)
     
     # 4. Reranking & Popularity Boost
     final_results = rerank_movies(user_query, fused)
@@ -145,21 +156,21 @@ def search_rrf_pipeline(user_query, top_n=150):
 # ============================================================
 
 if __name__ == "__main__":
-    test_query = "drama movie about magicians engage in competitive in an attempt to create the ultimate stage illusion."
-    test_query = "thriller sci-fi drama movie about two stage magicians engage in competitive one-upmanship in an attempt to create the ultimate stage illusion."
-    test_query = "action, epic movies about ancient Greeks their mythology, God`s, battles, voyages, adventures and wars "
-    test_query = "thriller drama movie where the husband of a missing woman becomes the main suspect in her disappearance with a Ben Affleck in the main role"
+    # test_query = "drama movie about magicians engage in competitive in an attempt to create the ultimate stage illusion."
+    # test_query = "thriller sci-fi drama movie about two stage magicians engage in competitive one-upmanship in an attempt to create the ultimate stage illusion."
+    # test_query = "action, epic movies about ancient Greeks their mythology, God`s, battles, voyages, adventures and wars "
+    # test_query = "thriller drama movie where the husband of a missing woman becomes the main suspect in her disappearance with a Ben Affleck in the main role"
     #test_query = "A drama romance movie about a guy from Alabama with a low IQ who ran in many countries."
     # test_query = "romantic love story aboard of giant ship of 20th‑century ship that sinks after hitting iceberg"
     # test_query = "movie where toys come to life"
     # test_query = "young FBI trainee looking for help of serial cannibal killer"
     #test_query = "movie about how Harvard undergrad student programmer created Facebook"
-    test_query = "Weary Wolverine cares for an ailing Professor X in a hideout on the Mexican border"
-    test_query = "Faded actor best known for playing a superhero attempts a comeback on Broadway"
-    test_query = "The story of Henry Hill and his life in the mob Ray Liotta Robert De Niro"
-    test_query = "Farm boy joins a galactic rebellion and learns about the Force"
-    test_query = "Scottish warrior leads a group of people against the English king with Mel Gibson main role"
-    #test_query = "A former hitman tries to settle down but is pulled back for one last job"
+    # test_query = "Weary Wolverine cares for an ailing Professor X in a hideout on the Mexican border"
+    # test_query = "Faded actor best known for playing a superhero attempts a comeback on Broadway"
+    # test_query = "The story of Henry Hill and his life in the mob Ray Liotta Robert De Niro"
+    # test_query = "Farm boy joins a galactic rebellion and learns about the Force"
+    # test_query = "Scottish warrior leads a group of people against the English king with Mel Gibson main role"
+    test_query = "A former hitman tries to settle down but is pulled back for one last job"
     print(f"\n🔎 Query: {test_query}")
 
     # Step 1: Rewriting
@@ -187,3 +198,4 @@ if __name__ == "__main__":
         print(f"{i}. {m['title']} (Final: {m['final_score']:.2f} | RRF: {m['rrf_score']:.4f})")
         print(f"   Overview: {m['overview'][:100]}...")
         print("-" * 50)
+    print(generate_recommendation(test_query, final_results[:20]))
