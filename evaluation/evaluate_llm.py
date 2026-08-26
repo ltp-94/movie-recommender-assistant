@@ -53,7 +53,8 @@
 import polars as pl
 import time
 #from rag.search_popularity import search_movies
-from chatgpt.rrf import search_rrf_pipeline as search_movies 
+#from chatgpt.rrf import search_rrf_pipeline as search_movies 
+from chatgpt.test import search_rrf_evaluation_pipeline as search_movies 
 
 
 

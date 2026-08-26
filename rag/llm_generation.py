@@ -58,7 +58,8 @@ def generate_recommendation(user_query: str, search_results: list):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        temperature=0.7
+        temperature=0.7,
+        seed=42
     )
 
     return response.choices[0].message.content

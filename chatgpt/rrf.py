@@ -10,6 +10,12 @@ from dotenv import load_dotenv
 from ingestion.config import INDEX_NAME, ELASTICSEARCH_URL
 from rag.llm_query_rewriting import rewrite_query
 from rag.llm_generation import generate_recommendation
+from reranker import rerank_movies
+from bm_25 import get_bm25_results
+from vector import get_vector_results
+from rrf_test import reciprocal_rank_fusion
+
+
 
 load_dotenv()
 
@@ -39,95 +45,95 @@ es = Elasticsearch(
 # 2. UPDATED SEARCH FUNCTIONS (Returning IDs)
 # ============================================================
 
-def get_bm25_results(query, top_n=100):
-    search_body = {
-        "size": top_n,
-        "query": {
-            "multi_match": {
-                "query": query,
-                "fields": ["genres.text", "overview^2", "cast^3", "director", "search_context^3"],
-                "type": "best_fields"
-            }
-        }
-    }
-    response = es.search(index=INDEX_NAME, body=search_body)
-    # We return a list of dicts that include BOTH the ID and the Source
-    return [{"id": hit["_id"], "content": hit["_source"]} for hit in response["hits"]["hits"]]
+# def get_bm25_results(query, top_n=100):
+#     search_body = {
+#         "size": top_n,
+#         "query": {
+#             "multi_match": {
+#                 "query": query,
+#                 "fields": ["genres.text", "overview^2", "cast^3", "director", "search_context^3"],
+#                 "type": "best_fields"
+#             }
+#         }
+#     }
+#     response = es.search(index=INDEX_NAME, body=search_body)
+#     # We return a list of dicts that include BOTH the ID and the Source
+#     return [{"id": hit["_id"], "content": hit["_source"]} for hit in response["hits"]["hits"]]
 
-def get_vector_results(query, top_n=100):
-    # Rewriting happens inside the high-level flow, not here
-    instruction = "Represent this sentence for searching relevant movie plots: "
-    query_vector = bi_encoder.encode(instruction + query, normalize_embeddings=True).tolist()
+# def get_vector_results(query, top_n=100):
+#     # Rewriting happens inside the high-level flow, not here
+#     instruction = "Represent this sentence for searching relevant movie plots: "
+#     query_vector = bi_encoder.encode(instruction + query, normalize_embeddings=True).tolist()
 
-    response = es.search(
-        index=INDEX_NAME,
-        knn={
-            "field": "embedding",
-            "query_vector": query_vector,
-            "k": top_n,
-            "num_candidates": 200
-        }
-    )
-    return [{"id": hit["_id"], "content": hit["_source"]} for hit in response["hits"]["hits"]]
+#     response = es.search(
+#         index=INDEX_NAME,
+#         knn={
+#             "field": "embedding",
+#             "query_vector": query_vector,
+#             "k": top_n,
+#             "num_candidates": 200
+#         }
+#     )
+#     return [{"id": hit["_id"], "content": hit["_source"]} for hit in response["hits"]["hits"]]
 
-# ============================================================
-# 3. RRF LOGIC
-# ============================================================
+# # ============================================================
+# # 3. RRF LOGIC
+# # ============================================================
 
-def reciprocal_rank_fusion(bm25_hits, vector_hits, k=60, top_n=150):
-    scores = {}
-    documents = {}
+# def reciprocal_rank_fusion(bm25_hits, vector_hits, k=60, top_n=150):
+#     scores = {}
+#     documents = {}
 
-    W_VECTOR = 0.7
-    W_BM25 = 0.3
+#     W_VECTOR = 0.7
+#     W_BM25 = 0.3
 
-    # Process BM25
-    for rank, hit in enumerate(bm25_hits, start=1):
-        doc_id = hit["id"]
-        scores[doc_id] = scores.get(doc_id, 0) + (W_BM25 / (k + rank))
-        documents[doc_id] = hit["content"]
+#     # Process BM25
+#     for rank, hit in enumerate(bm25_hits, start=1):
+#         doc_id = hit["id"]
+#         scores[doc_id] = scores.get(doc_id, 0) + (W_BM25 / (k + rank))
+#         documents[doc_id] = hit["content"]
 
-    # Process Vector
-    for rank, hit in enumerate(vector_hits, start=1):
-        doc_id = hit["id"]
-        scores[doc_id] = scores.get(doc_id, 0) + (W_VECTOR / (k + rank))
-        documents[doc_id] = hit["content"]
+#     # Process Vector
+#     for rank, hit in enumerate(vector_hits, start=1):
+#         doc_id = hit["id"]
+#         scores[doc_id] = scores.get(doc_id, 0) + (W_VECTOR / (k + rank))
+#         documents[doc_id] = hit["content"]
 
-    # Sort by RRF Score
-    ranked_ids = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+#     # Sort by RRF Score
+#     ranked_ids = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     
-    results = []
-    for doc_id, score in ranked_ids[:top_n]:
-        doc = documents[doc_id].copy()
-        doc["rrf_score"] = score
-        doc["_id"] = doc_id
-        results.append(doc)
+#     results = []
+#     for doc_id, score in ranked_ids[:top_n]:
+#         doc = documents[doc_id].copy()
+#         doc["rrf_score"] = score
+#         doc["_id"] = doc_id
+#         results.append(doc)
     
-    return results
+#     return results
 
-# ============================================================
-# 4. RERANKING LOGIC
-# ============================================================
+# # ============================================================
+# # 4. RERANKING LOGIC
+# # ============================================================
 
-def rerank_movies(query, movies):
-    if not movies:
-        return []
+# def rerank_movies(query, movies):
+#     if not movies:
+#         return []
 
-    pairs = []
-    for m in movies:
-        context = f"Title: {m.get('title')}. Genres: {m.get('genres')}. Plot: {m.get('overview')}. Keywoords: {m.get('keywords')}. Cast: {m.get('cast')}. Director: {m.get('director')}"
-        pairs.append([query, context])
+#     pairs = []
+#     for m in movies:
+#         context = f"Title: {m.get('title')}. Genres: {m.get('genres')}. Plot: {m.get('overview')}. Keywords: {m.get('keywords')}. Cast: {m.get('cast')}. Director: {m.get('director')}"
+#         pairs.append([query, context])
     
-    scores = cross_encoder.predict(pairs, batch_size=16, show_progress_bar=False)
+#     scores = cross_encoder.predict(pairs, batch_size=16, show_progress_bar=False)
     
-    for movie, score in zip(movies, scores):
-        movie["cross_score"] = float(score)
-        # Apply your popularity boost here if desired
-        pop = movie.get("popularity", 0) or 0
-        movie["final_score"] = movie["cross_score"] + (math.log(pop + 1) * 0.85)
+#     for movie, score in zip(movies, scores):
+#         movie["cross_score"] = float(score)
+#         # Apply your popularity boost here if desired
+#         pop = movie.get("popularity", 0) or 0
+#         movie["final_score"] = movie["cross_score"] + (math.log(pop + 1) * 0.85)
 
-    movies.sort(key=lambda x: x["final_score"], reverse=True)
-    return movies
+#     movies.sort(key=lambda x: x["final_score"], reverse=True)
+#     return movies
 
 
 # chatgpt/rrf.py
@@ -141,7 +147,7 @@ def search_rrf_pipeline(user_query, top_n=150):
     
     # 2. Retrieval (Broad candidates)
     # We fetch 50 from each to give RRF and Reranker enough to work with
-    bm25_res = get_bm25_results(rewritten, top_n=150)
+    bm25_res = get_bm25_results(user_query, top_n=150)
     vec_res = get_vector_results(rewritten, top_n=150)
     
     # 3. Fusion
@@ -170,7 +176,8 @@ if __name__ == "__main__":
     # test_query = "The story of Henry Hill and his life in the mob Ray Liotta Robert De Niro"
     # test_query = "Farm boy joins a galactic rebellion and learns about the Force"
     # test_query = "Scottish warrior leads a group of people against the English king with Mel Gibson main role"
-    test_query = "A former hitman tries to settle down but is pulled back for one last job"
+    test_query = "crime, drama movie where young daughter is disappear with her friend and police fails to find them, Hugh Jackman starring"
+    #test_query = "A former hitman tries to settle down but is pulled back for one last job"
     print(f"\n🔎 Query: {test_query}")
 
     # Step 1: Rewriting
