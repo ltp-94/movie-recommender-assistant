@@ -204,7 +204,7 @@ def run_ingestion(parquet_path: str):
                     "movie_link":     row.get("movie_link"),
                     
                     # THE FIX: Ensure key is 'embedding' (not 'embeddding')
-                    "embedding":      row.get("embedding") 
+                    "embeddings":      row.get("embeddings") 
                 }
             })
 

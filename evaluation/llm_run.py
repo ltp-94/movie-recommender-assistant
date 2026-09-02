@@ -1,11 +1,7 @@
 import os
 import json
-import polars as pl
-from tqdm import tqdm
 from openai import OpenAI
 from dotenv import load_dotenv
-# Імпортуємо вашу функцію RRF пошуку
-from chatgpt.test import search_rrf_evaluation_pipeline as search_movies
 
 load_dotenv()
 
@@ -14,107 +10,232 @@ client = OpenAI(
     base_url="https://api.groq.com/openai/v1"
 )
 
-# Для оцінки списків краще використовувати llama-3.1-70b, 
-# вона краще розуміє контекст між декількома фільмами.
-JUDGE_MODEL = "openai/gpt-oss-120b" 
 
-JUDGE_PROMPT = """
-You are a search quality auditor. Your job is to evaluate if a movie search engine is providing relevant recommendations.
+JUDGE_SYSTEM_PROMPT = """
+You are an expert evaluator of a movie recommendation RAG system.
 
-USER QUERY: {query}
-EXPECTED MOVIE (Ground Truth): {expected}
+Evaluate the recommendation using ONLY:
+- the user query
+- the expected movie
+- the retrieved movie context
+- the generated answer
 
-RETRIEVED LIST:
-{results_formatted}
+Do not use external knowledge.
 
-INSTRUCTIONS:
-1. Assign a score from 0 to 3 for EACH retrieved movie.
-   - 3: Perfect match (either the Expected Movie or an identical plot/intent).
-   - 2: Highly relevant (same genre, similar plot, same director/vibe).
-   - 1: Partially relevant (same actor but wrong genre, or weak connection).
-   - 0: Irrelevant (no connection).
-2. Provide a brief reasoning for each score.
-3. Be objective. If the search found a great alternative that isn't the Expected Movie, score it a 2.
+Score each criterion from 1 to 5.
 
-RETURN JSON ONLY:
-{{
-  "evaluations": [
-    {{"rank": 1, "title": "...", "score": 3, "reason": "..."}},
-    ...
-  ]
-}}
+1. GROUND_TRUTH_MATCH
+
+How well does the recommendation match the expected movie?
+
+5 = the expected movie is recommended and is an excellent match
+4 = a very strong alternative to the expected movie is recommended
+3 = the recommendation is reasonably relevant
+2 = the recommendation is weakly related
+1 = the recommendation is completely irrelevant
+
+2. FAITHFULNESS
+
+Are the claims in the generated answer supported by the retrieved movie context?
+
+5 = fully supported, no hallucinations
+4 = almost completely supported
+3 = mostly supported
+2 = several unsupported claims
+1 = many unsupported or hallucinated claims
+
+3. ANSWER_QUALITY
+
+How useful is the generated recommendation for the user?
+
+5 = excellent, clear and useful recommendation
+4 = good recommendation with a useful explanation
+3 = acceptable
+2 = weak
+1 = poor and does not satisfy the request
+
+4. OVERALL
+
+Give an overall score from 1 to 5 considering all criteria.
+
+IMPORTANT:
+The expected movie is the ground-truth reference.
+However, a very strong semantically equivalent alternative can receive
+a score of 4 even if it is not the exact expected movie.
+
+Return ONLY valid JSON:
+
+{
+    "ground_truth_match": 1-5,
+    "faithfulness": 1-5,
+    "answer_quality": 1-5,
+    "overall": 1-5,
+    "reason": "short explanation"
+}
 """
 
-def judge_search_results(query, expected, hits):
-    formatted_hits = ""
-    for i, m in enumerate(hits, 1):
-        formatted_hits += f"Rank {i}: {m['title']} | Overview: {m['overview'][:200]}...\n"
-    
-    prompt = JUDGE_PROMPT.format(
-        query=query, 
-        expected=expected, 
-        results_formatted=formatted_hits
+
+def judge_rag(
+    user_query,
+    expected_title,
+    retrieved_movies,
+    generated_answer
+):
+    """
+    Evaluate the final RAG recommendation against ground truth.
+    """
+
+    # --------------------------------------------------------
+    # Build retrieved movie context
+    # --------------------------------------------------------
+
+    context = ""
+
+    for rank, movie in enumerate(retrieved_movies, start=1):
+
+        context += f"""
+Rank: {rank}
+Title: {movie.get('title', '')}
+Genres: {movie.get('genres', '')}
+Director: {movie.get('director', '')}
+Cast: {movie.get('cast', '')}
+Plot: {movie.get('overview', '')}
+Keywords: {movie.get('keywords', '')}
+"""
+
+
+    # --------------------------------------------------------
+    # Judge prompt
+    # --------------------------------------------------------
+
+    user_prompt = f"""
+USER QUERY:
+{user_query}
+
+EXPECTED MOVIE (GROUND TRUTH):
+{expected_title}
+
+RETRIEVED MOVIE CONTEXT:
+{context}
+
+GENERATED ANSWER:
+{generated_answer}
+"""
+
+
+    # --------------------------------------------------------
+    # Call LLM Judge
+    # --------------------------------------------------------
+
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=[
+            {
+                "role": "system",
+                "content": JUDGE_SYSTEM_PROMPT
+            },
+            {
+                "role": "user",
+                "content": user_prompt
+            }
+        ],
+        temperature=0
     )
-    
-    try:
-        response = client.chat.completions.create(
-            model=JUDGE_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0
-        )
-        return json.loads(response.choices[0].message.content).get("evaluations", [])
-    except Exception as e:
-        print(f"Judge error: {e}")
-        return []
 
-def run_evaluation(gt_path, output_path, top_n=5):
-    df_gt = pl.read_csv(gt_path)
-    all_judgments = []
 
-    print(f"Evaluating {len(df_gt)} queries (Top {top_n})...")
+    # --------------------------------------------------------
+    # Parse JSON
+    # --------------------------------------------------------
 
-    for row in tqdm(df_gt.iter_rows(named=True)):
-        query = row['query']
-        expected = row['expected_title']
-        
-        # Виклик вашого пошуку
-        hits = search_movies(query, top_n=top_n)
-        
-        if not hits:
-            continue
-            
-        # Оцінка списку через LLM
-        evals = judge_search_results(query, expected, hits)
-        
-        for e in evals:
-            all_judgments.append({
-                "query": query,
-                "expected": expected,
-                "retrieved": e['title'],
-                "rank": e['rank'],
-                "llm_score": e['score'],
-                "llm_reasoning": e['reason']
-            })
+    result = response.choices[0].message.content
 
-    # Збереження та аналіз
-    res_df = pl.DataFrame(all_judgments)
-    
-    # Розрахунок середньої релевантності всього топу
-    avg_relevance = res_df['llm_score'].mean()
-    
-    # Розрахунок "Semantic Precision": відсоток результатів зі скором 2 або 3
-    semantic_precision = (res_df.filter(pl.col("llm_score") >= 2).height / len(res_df)) * 100
+    return json.loads(result)
 
-    print("\n" + "="*40)
-    print("LLM JUDGE METRICS")
-    print("-" * 40)
-    print(f"Average Relevance Score (0-3): {avg_relevance:.2f}")
-    print(f"Semantic Precision @ {top_n}: {semantic_precision:.1f}%")
-    print(f"Results saved to: {output_path}")
-    print("="*40)
-    
-    res_df.write_csv(output_path)
+
+# ============================================================
+# TEST
+# ============================================================
 
 if __name__ == "__main__":
-    run_evaluation("../data/ground_truth.csv", "evaluation/llm_judge_full_results.csv")
+
+    test_query = (
+        "young FBI trainee looking for help of serial cannibal killer"
+    )
+
+    test_expected_title = "The Silence of the Lambs"
+
+
+    test_movies = [
+
+        {
+            "title": "The Silence of the Lambs",
+            "genres": "Crime, Drama, Thriller",
+            "director": "Jonathan Demme",
+            "cast": "Jodie Foster, Anthony Hopkins",
+            "overview": (
+                "A young FBI cadet must receive the help of an "
+                "incarcerated and manipulative cannibal killer "
+                "to help catch another serial killer."
+            ),
+            "keywords": (
+                "FBI, serial killer, cannibal, investigation"
+            )
+        },
+
+        {
+            "title": "Se7en",
+            "genres": "Crime, Mystery, Thriller",
+            "director": "David Fincher",
+            "cast": "Brad Pitt, Morgan Freeman",
+            "overview": (
+                "Two detectives investigate a series of murders "
+                "based on the seven deadly sins."
+            ),
+            "keywords": (
+                "serial killer, detective, murder"
+            )
+        }
+    ]
+
+
+    test_answer = """
+### The Silence of the Lambs
+
+This is an excellent match because it follows a young FBI
+trainee who seeks the help of imprisoned cannibal killer
+Hannibal Lecter while investigating another serial killer.
+
+### Se7en
+
+This is also a crime thriller involving serial murders,
+although it does not specifically feature an FBI trainee
+working with a cannibal killer.
+"""
+
+
+    # --------------------------------------------------------
+    # Run Judge
+    # --------------------------------------------------------
+
+    result = judge_rag(
+        user_query=test_query,
+        expected_title=test_expected_title,
+        retrieved_movies=test_movies,
+        generated_answer=test_answer
+    )
+
+
+    # --------------------------------------------------------
+    # Print result
+    # --------------------------------------------------------
+
+    print("\nJudge result:")
+
+    print(
+        json.dumps(
+            result,
+            indent=4,
+            ensure_ascii=False
+        )
+    )
+

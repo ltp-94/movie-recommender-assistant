@@ -6,8 +6,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 # Import your custom logic
-from chatgpt.rrf import search_rrf_pipeline
-from rag.llm_generation import generate_recommendation
+from rag.llm_recommendation import generate_recommendation
+from rag.hybrid_search import search_rrf_pipeline
 from monitoring.db import save_conversation
 
 app = FastAPI(title="Movie Recommender API", description="RRF + Reranking + RAG")
@@ -21,7 +21,13 @@ class MovieInfo(BaseModel):
     title: str
     year: Optional[int]
     genres: Optional[str]
+    director: Optional[str]
+    cast: Optional[str]
+    runtime: int
+    imdb_rating: float
+    vote_average: float
     final_score: float
+
 
 class RecommendationResponse(BaseModel):
     conversation_id: str
@@ -46,7 +52,7 @@ async def recommend_movies(request: QueryRequest):
 
         # 2. Generate the LLM Recommendation (RAG)
         # CRITICAL: We only pass the TOP 5 to avoid the "Request too large" (TPM) error
-        ai_response = generate_recommendation(user_query, final_results[:20])
+        ai_response = generate_recommendation(user_query)
 
         # 3. Calculate metrics for Monitoring
         end_time = time.time()
@@ -75,8 +81,13 @@ async def recommend_movies(request: QueryRequest):
             "top_movies": [
                 {
                     "title": m.get("title"),
-                    "year": m.get("year"),
                     "genres": m.get("genres"),
+                    "director": m.get("director"),
+                    "cast": m.get("cast"),
+                    "year": m.get("release_year"),
+                    "runtime": m.get("runtime"),
+                    "imdb_rating": m.get("imdb_rating", 0.0),
+                    "vote_average": m.get("vote_average", 0.0),
                     "final_score": round(m.get("final_score", 0), 2)
                 } for m in final_results
             ],

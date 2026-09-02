@@ -36,3 +36,38 @@ query = "Weary Wolverine cares for an ailing Professor X in a hideout on the Mex
 
 if __name__=="__main__":
     print(rewrite_query(query))
+
+
+# import os
+# from google import genai
+# from dotenv import load_dotenv
+
+# load_dotenv()
+
+# # Initialize the Client
+# # If using an AI Studio key, do NOT set vertexai=True
+# client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+# def rewrite_query(user_query):
+#     system_prompt = """
+#     You are an expert movie researcher. Your job is to take a user 
+#     request and rewrite it into a descriptive search query focusing 
+#     on plot themes, genres, and character descriptions. 
+#     Output ONLY the rewritten search string.
+#     """
+    
+#     try:
+#         # Use 'gemini-1.5-flash' exactly as the model name
+#         response = client.models.generate_content(
+#             model="gemini-1.5-flash",
+#             contents=f"{system_prompt}\n\nUser request: {user_query}"
+#         )
+#         return response.text.strip()
+#     except Exception as e:
+#         print(f"⚠️ Gemini Error: {e}")
+#         # Fallback: if Gemini fails, return the original query so the app doesn't crash
+#         return user_query
+
+# if __name__ == "__main__":
+#     test_q = "Wolverine movie with Professor X"
+#     print(f"Rewritten: {rewrite_query(test_q)}")
