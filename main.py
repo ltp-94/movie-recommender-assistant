@@ -8,7 +8,7 @@ from typing import List, Optional
 # Import your custom logic
 from rag.llm_recommendation import generate_recommendation
 from rag.hybrid_search import search_rrf_pipeline
-from monitoring.db import save_conversation
+from monitoring.db import save_conversation, save_feedback, init_db
 
 app = FastAPI(title="Movie Recommender API", description="RRF + Reranking + RAG")
 
@@ -23,9 +23,9 @@ class MovieInfo(BaseModel):
     genres: Optional[str]
     director: Optional[str]
     cast: Optional[str]
-    runtime: int
-    imdb_rating: float
-    vote_average: float
+    runtime: Optional[int] = 0        # Додайте Optional та дефолт 0
+    imdb_rating: Optional[float] = 0.0 # Вже добре
+    vote_average: Optional[float] = 0.0 # Вже добре
     final_score: float
 
 
@@ -35,7 +35,23 @@ class RecommendationResponse(BaseModel):
     top_movies: List[MovieInfo]
     response_time: float
 
+class FeedbackRequest(BaseModel):
+    conversation_id: str
+    feedback: int 
+
+
 # --- Endpoints ---
+from monitoring.db import save_conversation, save_feedback, init_db # Додайте init_db
+
+@app.on_event("startup")
+async def startup_event():
+    print("🚀 Initializing Database...")
+    try:
+        init_db()
+        print("✅ Database tables ensured.")
+    except Exception as e:
+        print(f"❌ Database initialization failed: {e}")
+
 
 @app.post("/recommend", response_model=RecommendationResponse)
 async def recommend_movies(request: QueryRequest):
@@ -97,6 +113,25 @@ async def recommend_movies(request: QueryRequest):
     except Exception as e:
         print(f"❌ API Error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@app.post("/feedback")
+async def post_feedback(request: FeedbackRequest):
+    try:
+        # Перевіряємо, чи feedback є коректним значенням (опціонально)
+        if request.feedback not in [1, -1]:
+            raise HTTPException(status_code=400, detail="Feedback must be 1 or -1")
+
+        # Зберігаємо в базу даних
+        save_feedback(request.conversation_id, request.feedback)
+        
+        return {"message": f"Feedback received for conversation {request.conversation_id}"}
+    
+    except Exception as e:
+        # Якщо conversation_id не існує в базі, Postgres видасть помилку Foreign Key
+        print(f"❌ Feedback Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Could not save feedback. Make sure conversation_id exists.")
+
 
 @app.get("/health")
 def health_check():

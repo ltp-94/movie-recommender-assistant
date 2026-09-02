@@ -158,15 +158,13 @@ def run_ingestion(parquet_path: str):
         return
 
     print(f"📂 Loading data from: {parquet_path}")
-    raw_df = pl.read_parquet(parquet_path)
+    df = pl.read_parquet(parquet_path)
     
-    # 2. PRE-PROCESS (Constructs URLs, Years, etc.)
-    df = prepare_data(raw_df)
     total_docs = len(df)
     
     print(f"✅ Data prepared. Total movies to index: {total_docs}")
 
-    # 3. CHUNKED INGESTION LOOP
+    # 2. CHUNKED INGESTION LOOP
     print(f"🚀 Starting ingestion in chunks of {BATCH_SIZE}...")
 
     for start in range(0, total_docs, BATCH_SIZE):
@@ -198,7 +196,7 @@ def run_ingestion(parquet_path: str):
                     "release_year":   row.get("release_year"),
                     "popularity":     row.get("popularity"),
                     "vote_average":   row.get("vote_average"),
-                    "imdb_rating":    row.get("imdb_rating"),
+                    "imdb_rating":    row.get("imdb_rating", 0),
                     "vote_count":     row.get("vote_count"),
                     "poster_url":     row.get("poster_url"),
                     "movie_link":     row.get("movie_link"),
@@ -214,7 +212,7 @@ def run_ingestion(parquet_path: str):
         
         print(f"📦 Progress: {end}/{total_docs} movies indexed...")
 
-    # 4. FINALIZE
+    # 3. FINALIZE
     es.indices.refresh(index=INDEX_NAME)
     final_count = es.count(index=INDEX_NAME)["count"]
     print(f"\n✨ Ingestion Successful!")
