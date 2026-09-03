@@ -128,7 +128,6 @@ async def post_feedback(request: FeedbackRequest):
         return {"message": f"Feedback received for conversation {request.conversation_id}"}
     
     except Exception as e:
-        # Якщо conversation_id не існує в базі, Postgres видасть помилку Foreign Key
         print(f"❌ Feedback Error: {str(e)}")
         raise HTTPException(status_code=500, detail="Could not save feedback. Make sure conversation_id exists.")
 
